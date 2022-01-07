@@ -57,8 +57,8 @@ class TPatch:
             assert h == w, "只实现了正方形的EoT"
             s = h
             pre_scale = 1 / (math.cos(eot_angle) + math.sin(eot_angle))
-            h = w = math.ceil(s * pre_scale)
-            pre_scale = h / s
+            h = w = math.ceil(s / pre_scale)
+            pre_scale = s / h
             self.robust = EoT(angle=eot_angle,
                               scale=eot_scale,
                               pre_scale=pre_scale,
@@ -182,10 +182,7 @@ class EoT(nn.Module):
         self.scale = scale
         self.pre_scale = pre_scale
         self.p = p
-        self.color = tv.transforms.ColorJitter(brightness=0.2,
-                                               contrast=0.2,
-                                               saturation=0.1,
-                                               hue=0.1)
+        self.color = tv.transforms.ColorJitter(brightness=0.2)
 
     def forward(self,
                 patch: TPatch,
@@ -225,14 +222,14 @@ class EoT(nn.Module):
         elif set_rotate is None:
             angle = torch.zeros(1)
         else:
-            angle = torch.full(1, set_rotate)
+            angle = torch.full((1, ), set_rotate)
 
         if do_random_resize:
             scale_ratio = torch.FloatTensor(1).uniform_(self.scale, 1)
         elif set_resize is None:
             scale_ratio = torch.ones(1)
         else:
-            scale_ratio = torch.full(1, set_resize)
+            scale_ratio = torch.full((1, ), set_resize)
 
         # ! 这里实现并不完美，现在是先平均降采样，再双线性插值，目的是避免出现仅关注几个点的问题
         scale = scale_ratio * self.pre_scale

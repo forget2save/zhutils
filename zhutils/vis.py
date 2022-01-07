@@ -1,7 +1,7 @@
 from .lib import *
 
 
-def log_init(filename="example.log", show=True, file=True):
+def log_init(filename="example.log", show=True, file=True, level=logging.INFO):
     assert show or file, "must choose at least one"
     handlers = []
     if show:
@@ -9,7 +9,7 @@ def log_init(filename="example.log", show=True, file=True):
     if file:
         handlers.append(logging.FileHandler(filename))
     logging.basicConfig(format='[%(asctime)s] (%(levelname)s) %(message)s',
-                        level=logging.DEBUG,
+                        level=level,
                         handlers=handlers)
 
 
