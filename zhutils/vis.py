@@ -1,6 +1,18 @@
 from .lib import *
 
 
+def log_init(filename="example.log", show=True, file=True):
+    assert show or file, "must choose at least one"
+    handlers = []
+    if show:
+        handlers.append(logging.StreamHandler())
+    if file:
+        handlers.append(logging.FileHandler(filename))
+    logging.basicConfig(format='[%(asctime)s] (%(levelname)s) %(message)s',
+                        level=logging.DEBUG,
+                        handlers=handlers)
+
+
 class AdaptiveAxes:
     def __init__(self,
                  n_figure: int,
@@ -14,10 +26,9 @@ class AdaptiveAxes:
                                            self.n_col,
                                            squeeze=False,
                                            figsize=self.fig_size)
-    
+
     def __iter__(self):
         for i in range(self.n):
             j = i // self.n_col
             k = i % self.n_col
             yield self.axes[j][k]
-

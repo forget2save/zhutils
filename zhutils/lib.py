@@ -29,7 +29,8 @@ from torch.utils.data import DataLoader, Dataset
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# arg parser
+# terminal input and output
+import logging
 from argparse import ArgumentParser
 
 # progress visualization & timing
