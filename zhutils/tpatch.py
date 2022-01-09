@@ -1,5 +1,242 @@
-from ..lib import *
-from .io import load_imagenet_preprocess
+from .lib import *
+from torch.utils.data import random_split
+
+
+def _gamma_correction(imgs: torch.Tensor, gamma: float) -> torch.Tensor:
+    """模拟运动模糊过程中图像的gamma校正影响
+
+    Args:
+        imgs (torch.Tensor): 需要有多张不同平移的图像作为输入
+        gamma (float): gamma校正系数，通常取2.2
+
+    Returns:
+        torch.Tensor: 考虑gamma校正后生成的模糊图像
+    """
+    n = imgs.shape[0]
+    out = 0
+    for img in imgs:
+        # 从RGB到光
+        out += (1e-6 + img)**gamma
+    # 从光到RGB
+    out = (1e-6 + out / n)**(1 / gamma)
+    return out
+
+
+def _sine_grid(div: int, device: str) -> torch.Tensor:
+    """正弦运动采样格点
+
+    Args:
+        div (int): 总共格点数
+
+    Returns:
+        torch.Tensor: 表征半个正弦运动过程的格点
+    """
+    # 此处假设是从两峰之间的半周期运动
+    grid = torch.linspace(-0.5 * math.pi, 0.5 * math.pi, div, device=device)
+    grid = (torch.sin(grid) + 1) / 2
+    return grid
+
+
+def _stn_blur_linear(img: torch.Tensor, div: int, x: float, y: float,
+                     blur_grid: torch.Tensor, mean_func: Callable,
+                     device: str) -> torch.Tensor:
+    """pytorch基于STN实现线性模糊的方法
+
+    Args:
+        img (torch.Tensor): 维度为4，支持多组图像
+        div (int): 使用多少张图像叠加生成模糊效果
+        x (float): x轴水平移动，取值范围为[-1, 1]
+        y (float): y轴竖直移动，取值范围为[-1, 1]
+        blur_grid (torch.Tensor): 不同运动方式的采样格点，线性或正弦
+        mean_func (Callable): 不同的合成方式，平均或考虑gamma校正
+    """
+    ones = torch.ones_like(blur_grid, device=device)
+    zeros = torch.zeros_like(blur_grid, device=device)
+    x = x * blur_grid
+    y = y * blur_grid
+    affine_tensor = torch.stack([
+        torch.stack([ones, zeros, x]),
+        torch.stack([zeros, ones, y]),
+    ]).permute(2, 0, 1)
+    grid = F.affine_grid(affine_tensor, [div, *img.shape[1:]],
+                         align_corners=False)
+    imgs = img.unsqueeze(dim=1).expand(-1, div, -1, -1, -1)
+    res = []
+    for i in range(img.shape[0]):
+        samples = F.grid_sample(imgs[i],
+                                grid,
+                                padding_mode="border",
+                                align_corners=False)
+        blur_img = mean_func(samples)
+        res.append(blur_img)
+    res = torch.cat(res, dim=0)
+    return res
+
+
+def stn_blur_2d(img: torch.Tensor, x: float, y: float, div: int,
+                device: str) -> torch.Tensor:
+    """使用STN实现的图像线性模糊效果，支持同时处理多张图像
+
+    Args:
+        img (torch.Tensor): 维度为4，支持多组图像
+        x (float): x轴水平移动，取值范围为[-1, 1]
+        y (float): y轴竖直移动，取值范围为[-1, 1]
+        div (int): 使用多少张图像叠加生成模糊效果
+    """
+    blur_grid = torch.linspace(0, 1, div, device=device)
+    mean_func = lambda x: torch.mean(x, dim=0, keepdim=True)
+    res = _stn_blur_linear(img, div, x, y, blur_grid, mean_func, device)
+    return res
+
+
+def stn_blur_2d_gamma(img: torch.Tensor,
+                      x: float,
+                      y: float,
+                      div: int,
+                      device: str,
+                      gamma: float = 2.2) -> torch.Tensor:
+    """使用STN实现的图像线性模糊效果，支持同时处理多张图像，考虑了gamma校正
+
+    Args:
+        img (torch.Tensor): 维度为4，支持多组图像
+        x (float): x轴水平移动，取值范围为[-1, 1]
+        y (float): y轴竖直移动，取值范围为[-1, 1]
+        div (int): 使用多少张图像叠加生成模糊效果
+        gamma (float, optional): gamma校正系数，通常取2.2
+    """
+    blur_grid = torch.linspace(0, 1, div, device=device)
+    mean_func = lambda x: _gamma_correction(x, gamma).unsqueeze(0)
+    res = _stn_blur_linear(img, div, x, y, blur_grid, mean_func, device)
+    return res
+
+
+def stn_blur_2d_sin(img: torch.Tensor, x: float, y: float, div: int,
+                    device: str) -> torch.Tensor:
+    """使用STN实现的图像线性模糊效果，支持同时处理多张图像，考虑了半周期正弦运动
+
+    Args:
+        img (torch.Tensor): 维度为4，支持多组图像
+        x (float): x轴水平移动，取值范围为[-1, 1]
+        y (float): y轴竖直移动，取值范围为[-1, 1]
+        div (int): 使用多少张图像叠加生成模糊效果
+    """
+    blur_grid = _sine_grid(div, device)
+    mean_func = lambda x: torch.mean(x, dim=0, keepdim=True)
+    res = _stn_blur_linear(img, div, x, y, blur_grid, mean_func, device)
+    return res
+
+
+def stn_blur_2d_gamma_sin(img: torch.Tensor,
+                          x: float,
+                          y: float,
+                          div: int,
+                          device: str,
+                          gamma: float = 2.2) -> torch.Tensor:
+    """使用STN实现的图像线性模糊效果，支持同时处理多张图像，考虑了半周期正弦运动和gamma校正
+
+    Args:
+        img (torch.Tensor): 维度为4，支持多组图像
+        x (float): x轴水平移动，取值范围为[-1, 1]
+        y (float): y轴竖直移动，取值范围为[-1, 1]
+        div (int): 使用多少张图像叠加生成模糊效果
+        gamma (float, optional): gamma校正系数，通常取2.2
+    """
+    blur_grid = _sine_grid(div, device)
+    mean_func = lambda x: _gamma_correction(x, gamma).unsqueeze(0)
+    res = _stn_blur_linear(img, div, x, y, blur_grid, mean_func, device)
+    return res
+
+
+def load_imagenet_preprocess() -> tv.transforms.Normalize:
+    """加载imagenet的归一化函数
+    """
+    return tv.transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+    )
+
+
+def load_imagenet_val(dataset: str,
+                      batch_size: int = 1,
+                      size: int = 50000,
+                      shuffle: bool = True,
+                      inc: bool = False) -> DataLoader:
+    """加载ImageNet验证集
+
+    Args:
+        dataset (str): 存放数据集的位置，该位置下应该存在1000个文件夹，序号从0~999，存放各类图片
+        size (int, optional): 所要加载的数据集大小，最大不超过50000，采用随机切分方法. Defaults to 50000.
+        shuffle (bool, optional): 是否打乱加载顺序. Defaults to True.
+        inc (bool, optional): 是否是Inception格式（299*299），默认是224*224. Defaults to False.
+    """
+    imagenet = tv.datasets.ImageFolder(dataset,
+                                       transform=tv.transforms.Compose([
+                                           tv.transforms.Resize(299),
+                                           tv.transforms.CenterCrop(
+                                               (299, 299)),
+                                           tv.transforms.ToTensor(),
+                                       ]) if inc else tv.transforms.Compose([
+                                           tv.transforms.Resize(256),
+                                           tv.transforms.CenterCrop(
+                                               (224, 224)),
+                                           tv.transforms.ToTensor(),
+                                       ]))
+    if size != 50000:
+        partial = [size, 50000 - size]
+        imagenet, _ = random_split(imagenet, partial)
+    return DataLoader(
+        imagenet,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=5 if batch_size >= 10 else 0,
+    )
+
+
+def read_img(path: str, device: str, crop_size: int = None) -> torch.Tensor:
+    """加载单张图像
+
+    Args:
+        path (str): 图像所存储的路径
+        crop_size (int, optional): 中心裁剪尺寸，默认是原图
+    """
+    if crop_size is None:
+        tr = tv.transforms.ToTensor()
+    else:
+        tr = tv.transforms.Compose([
+            tv.transforms.Resize(crop_size),
+            tv.transforms.CenterCrop((crop_size, crop_size)),
+            tv.transforms.ToTensor(),
+        ])
+    return tr(Image.open(path)).unsqueeze(0).to(device)
+
+
+class ImageOnlyLoader:
+    def __init__(self,
+                 glob_path: str,
+                 transform: Callable,
+                 shuffle: bool = True) -> None:
+        """一个仅输出图像的简易加载器，所要加载的图像依赖`glob`库进行索引
+
+        Args:
+            glob_path (str): glob匹配字符
+            transform (Callable): 对转为Tensor格式后的原图片的预处理函数
+            shuffle (bool, optional): 是否打乱加载顺序. Defaults to True.
+        """
+        self.img_names = sorted(glob(glob_path))
+        self.length = len(self.img_names)
+        self.shuffle = shuffle
+        if self.shuffle:
+            random.shuffle(self.img_names)
+        self.pil2tensor = tv.transforms.ToTensor()
+        self.transform = transform
+
+    def __getitem__(self, key: int) -> torch.Tensor:
+        img = self.transform(self.pil2tensor(Image.open(
+            self.img_names[key]))).unsqueeze(dim=0)
+        return img
+
+    def __len__(self) -> int:
+        return self.length
 
 
 class MIFGSM(nn.Module):
@@ -71,6 +308,7 @@ class TPatch:
         self.data = torch.rand(self.shape, device=device, requires_grad=True)
         self.opt = MIFGSM(m=momentum, lr=lr)
         self.pil2tensor = tv.transforms.ToTensor()
+        self.last_scale = 1.0
 
     def apply(self,
               img: torch.Tensor,
@@ -101,11 +339,8 @@ class TPatch:
                                                  set_rotate=set_rotate,
                                                  set_resize=set_resize)
             else:
-                switch, padding, scale_ratio = self.robust(
+                switch, padding, self.last_scale = self.robust(
                     self, pos, img.shape[-2:])
-                if transform:
-                    padding = transform(padding)
-                return torch.where(switch, img, padding), scale_ratio
         else:
             switch, padding = self.mask(img.shape, pos)
         if transform:

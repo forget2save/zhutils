@@ -13,6 +13,16 @@ def log_init(filename="example.log", show=True, file=True, level=logging.INFO):
                         handlers=handlers)
 
 
+def get_new_name(x, y="crop"):
+    _, ext = os.path.splitext(x)
+    return x.replace(ext, "_" + y + ext)
+
+
+def get_new_extension(x, y=".png"):
+    x, _ = os.path.splitext(x)
+    return x + y
+
+
 class AdaptiveAxes:
     def __init__(self,
                  n_figure: int,
