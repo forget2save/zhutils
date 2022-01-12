@@ -171,24 +171,6 @@ def upscale(img, x: int):
     return img_u
 
 
-def train_color_model(sim_img: Union[str, np.ndarray],
-                      phy_img: Union[str, np.ndarray],
-                      device: str = "cpu",
-                      n_neuron: int = 16) -> ColorModel:
-    model = ColorModel(n_neuron)
-    model.to(device).train()
-    loader = DataLoader(Pixel2Pixel(sim_img, phy_img),
-                        batch_size=16,
-                        shuffle=True)
-    metric = nn.MSELoss()
-    opt = optim.SGD(model.parameters(), 1, 0.9)
-    sch = optim.lr_scheduler.StepLR(opt, 30, 0.1)
-    epoch = 100
-    _train(model, metric, opt, sch, loader, epoch, device)
-    model.eval()
-    return model
-
-
 def colormap2D(img, ax):
     values = img.flatten().astype(np.float32)
     df = pd.DataFrame({"values": values})
@@ -428,3 +410,21 @@ class AdaptiveCropper:
                 cv2.imwrite(self.save_path, patch)
                 cv2.destroyWindow(self.winname)
                 break
+
+
+def train_color_model(sim_img: Union[str, np.ndarray],
+                      phy_img: Union[str, np.ndarray],
+                      device: str = "cpu",
+                      n_neuron: int = 16) -> ColorModel:
+    model = ColorModel(n_neuron)
+    model.to(device).train()
+    loader = DataLoader(Pixel2Pixel(sim_img, phy_img),
+                        batch_size=16,
+                        shuffle=True)
+    metric = nn.MSELoss()
+    opt = optim.SGD(model.parameters(), 1, 0.9)
+    sch = optim.lr_scheduler.StepLR(opt, 30, 0.1)
+    epoch = 100
+    _train(model, metric, opt, sch, loader, epoch, device)
+    model.eval()
+    return model
