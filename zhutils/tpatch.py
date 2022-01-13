@@ -292,14 +292,7 @@ class TPatch:
         """
         if eot:
             assert h == w, "只实现了正方形的EoT"
-            s = h
-            pre_scale = 1 / (math.cos(eot_angle) + math.sin(eot_angle))
-            h = w = math.ceil(s / pre_scale)
-            pre_scale = s / h
-            self.robust = EoT(angle=eot_angle,
-                              scale=eot_scale,
-                              pre_scale=pre_scale,
-                              p=p)
+            self.robust = EoT(angle=eot_angle, scale=eot_scale, p=p)
         self.eot = eot
         self.w = int(w)
         self.h = int(h)
@@ -345,7 +338,7 @@ class TPatch:
             switch, padding = self.mask(img.shape, pos)
         if transform:
             padding = transform(padding)
-        return torch.where(switch, img, padding)
+        return (1 - switch) * img + switch * padding
 
     def update(self, loss: torch.Tensor) -> None:
         """输入loss，更新patch
@@ -403,19 +396,17 @@ class TPatch:
 
 
 class EoT(nn.Module):
-    def __init__(self, angle=math.pi / 9, scale=0.8, pre_scale=0.8, p=0.5):
+    def __init__(self, angle=math.pi / 9, scale=0.8, p=0.5):
         """EoT模块
 
         Args:
             angle ([type], optional): 旋转角度，这里是范围的一半. Defaults to math.pi/9.
             scale (float, optional): 缩放尺寸范围. Defaults to 0.8.
-            pre_scale (float, optional): 为了避免旋转过界的预缩放尺寸，可以通过公式计算: 1/(sin(a)+cos(a)). Defaults to 0.8.
             p (float, optional): 以一定概率随机进行EoT. Defaults to 0.5.
         """
         super(EoT, self).__init__()
         self.angle = angle
         self.scale = scale
-        self.pre_scale = pre_scale
         self.p = p
         self.color = tv.transforms.ColorJitter(brightness=0.2)
 
@@ -442,6 +433,7 @@ class EoT(nn.Module):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, float]: 一个mask和做完padding的patch，以及随机resize的数值，常用于detector的框位置的确定
         """
+        # 以一定概率EoT来稳定训练
         if torch.rand(1) > self.p:
             do_random_rotate = False
             do_random_color = False
@@ -459,15 +451,25 @@ class EoT(nn.Module):
         else:
             angle = torch.full((1, ), set_rotate)
 
+        # ! 动态解决旋转带来的超出区域问题
+        pre_scale = 1 / (torch.cos(angle) + torch.sin(torch.abs(angle)))
+        pre_scale = pre_scale.item()
+
         if do_random_resize:
-            scale_ratio = torch.FloatTensor(1).uniform_(self.scale, 1)
+            min_scale = min(self.scale / pre_scale, 1.0)
+            scale_ratio = torch.FloatTensor(1).uniform_(min_scale, 1)
         elif set_resize is None:
             scale_ratio = torch.ones(1)
         else:
             scale_ratio = torch.full((1, ), set_resize)
 
         # ! 这里实现并不完美，现在是先平均降采样，再双线性插值，目的是避免出现仅关注几个点的问题
-        scale = scale_ratio * self.pre_scale
+        scale = scale_ratio * pre_scale
+        logging.debug(
+            f"scale_ratio: {scale_ratio.item():.2f}, "
+            f"angle: {angle.item():.2f}, pre_scale: {pre_scale:.2f}, "
+            f"scale: {scale.item():.2f}, ")
+
         t = -torch.ceil(torch.log2(scale))
         t = 1 << int(t.item())
         if t > 1:
@@ -509,8 +511,9 @@ class EoT(nn.Module):
         ))
         mask = pad(mask)
         padding = pad(output)
+        mask = torch.clamp(mask, 0, 1)
 
-        return mask == 0, padding, scale_ratio.item()
+        return mask, padding, scale_ratio.item()
 
 
 class TVLoss(nn.Module):
