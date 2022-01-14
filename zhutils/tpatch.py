@@ -391,6 +391,7 @@ class TPatch:
         """
         self.data = self.pil2tensor(Image.open(path))
         self.data = self.data.unsqueeze(0).to(self.device)
+        self.data.requires_grad_()
         self.shape = list(self.data.shape)
         _, _, self.h, self.w = self.shape
 
@@ -591,3 +592,39 @@ class ContentLoss(nn.Module):
         x = self.get_content_layer(x)
         loss = F.mse_loss(x, self.ref)
         return loss
+
+
+def compute_iou(bboxes_a: torch.Tensor,
+                bboxes_b: torch.Tensor,
+                xyxy: bool = True) -> torch.Tensor:
+    """计算多个框与多个框的交并面积比，两者需要统一坐标格式
+
+    Args:
+        bboxes_a (torch.Tensor): shape==n*4的框
+        bboxes_b (torch.Tensor): shape==m*4的框
+        xyxy (bool, optional): xyxy格式或者xywh格式. Defaults to True.
+
+    Returns:
+        torch.Tensor: n*m格式的交并比
+    """
+    if xyxy:
+        tl = torch.max(bboxes_a[:, None, :2], bboxes_b[:, :2])
+        br = torch.min(bboxes_a[:, None, 2:], bboxes_b[:, 2:])
+        area_a = torch.prod(bboxes_a[:, 2:] - bboxes_a[:, :2], 1)
+        area_b = torch.prod(bboxes_b[:, 2:] - bboxes_b[:, :2], 1)
+    else:
+        tl = torch.max((bboxes_a[:, None, :2] - bboxes_a[:, None, 2:] / 2),
+                       (bboxes_b[:, :2] - bboxes_b[:, 2:] / 2))
+        br = torch.min((bboxes_a[:, None, :2] + bboxes_a[:, None, 2:] / 2),
+                       (bboxes_b[:, :2] + bboxes_b[:, 2:] / 2))
+        area_a = torch.prod(bboxes_a[:, 2:], 1)
+        area_b = torch.prod(bboxes_b[:, 2:], 1)
+
+    logging.debug(f"shape of tl or br: {tl.shape.__repr__()}")
+    logging.debug(f"shape of area a: {area_a.shape.__repr__()}")
+
+    en = (tl < br).type(tl.type()).prod(dim=2)
+    area_i = torch.prod(br - tl, 2) * en  # * ((tl < br).all())
+    area_u = area_a[:, None] + area_b - area_i
+    iou = area_i / area_u
+    return iou
