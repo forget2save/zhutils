@@ -233,6 +233,9 @@ class ImageOnlyLoader:
     def __getitem__(self, key: int) -> torch.Tensor:
         img = self.transform(self.pil2tensor(Image.open(
             self.img_names[key]))).unsqueeze(dim=0)
+        # deal with gray images
+        if img.shape[1] == 1:
+            img = torch.cat([img] * 3, dim=1)
         return img
 
     def __len__(self) -> int:
@@ -352,7 +355,7 @@ class TPatch:
 
     def mask(self, shape: torch.Size,
              pos: Tuple[int, int]) -> Tuple[torch.Tensor, torch.Tensor]:
-        """产生一个简单的非EoT的mask
+        """产生一个简单的非EoT的mask，其中1代表属于patch的像素，0代表属于img的像素
 
         Args:
             shape (torch.Size): 背景图像尺寸
@@ -361,12 +364,12 @@ class TPatch:
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: 一个mask和做完padding的patch
         """
-        mask = torch.ones(shape, dtype=torch.long, device=self.device)
-        mask[..., pos[0]:pos[0] + self.h, pos[1]:pos[1] + self.w] = 0
+        mask = torch.zeros(shape, dtype=torch.float, device=self.device)
+        mask[..., pos[0]:pos[0] + self.h, pos[1]:pos[1] + self.w] = 1
         padding = torch.zeros(shape, dtype=torch.float, device=self.device)
         padding[..., pos[0]:pos[0] + self.h,
                 pos[1]:pos[1] + self.w] = self.data
-        return mask == 1, padding
+        return mask, padding
 
     def random_pos(self, shape: torch.Size) -> Tuple[int, int]:
         """用于获取一个合法的随机放置位置
