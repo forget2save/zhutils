@@ -23,6 +23,34 @@ def get_new_extension(x, y=".png"):
     return x + y
 
 
+def recursive_print(model_output, level=None, max_depth=3):
+    ms = model_output
+    if level is None:
+        level = []
+    elif len(level) > max_depth:
+        return
+    else:
+        print("-".join(str(k) for k in level), type(ms), end=" ")
+
+    if isinstance(ms, torch.Tensor) or isinstance(ms, np.ndarray):
+        print("shape:", tuple(ms.shape), "range:", (ms.min(), ms.max()))
+    elif isinstance(ms, list) or isinstance(ms, tuple):
+        print("length:", len(ms))
+        for i, m in enumerate(ms):
+            level.append(i)
+            recursive_print(m, level)
+            level.pop()
+    elif isinstance(ms, dict):
+        print("length:", len(ms.keys()))
+        for i, (k, m) in enumerate(ms.items()):
+            print(k + ":")
+            level.append(i)
+            recursive_print(m, level)
+            level.pop()
+    else:
+        print("value:", ms)
+
+
 class AdaptiveAxes:
     def __init__(self,
                  n_figure: int,
