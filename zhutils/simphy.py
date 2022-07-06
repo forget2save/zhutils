@@ -353,9 +353,15 @@ class ColorModel(nn.Module):
         if self.training:
             x = self.model(x)
         elif isinstance(x, torch.Tensor):
-            x = x.permute(0, 2, 3, 1).view(-1, 3)
-            x = self.model(x - 0.5)
-            x = x + 0.5
+            if x.ndim == 3:
+                x = x.permute(1, 2, 0)
+                x = self.model(x - 0.5) + 0.5
+                x = x.permute(2, 0, 1)
+            else:
+                x = x.permute(0, 2, 3, 1)
+                x = self.model(x - 0.5) + 0.5
+                x = x.permute(0, 3, 1, 2)
+            x = torch.clamp(x, 0, 1)
         elif isinstance(x, np.ndarray):
             h, w = x.shape[:2]
             x = x.reshape(-1, 3).astype(np.float32)
