@@ -1,4 +1,3 @@
-from eagerpy import Tensor
 from .lib import *
 from .third_party.yolov5.models.yolo import attempt_load, non_max_suppression
 from .third_party.yolov5.utils.loss import ComputeLoss
