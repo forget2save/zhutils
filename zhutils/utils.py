@@ -27,7 +27,7 @@ def ndarray2tensor(img: np.ndarray):
 
 
 def read_img(path: str) -> torch.Tensor:
-    return pil2tensor(Image.open(path)).unsqueeze(0)
+    return pil2tensor(Image.open(path).convert("RGB")).unsqueeze(0)
 
 
 def write_img(img: torch.Tensor, path: str):
