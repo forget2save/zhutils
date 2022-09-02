@@ -1,9 +1,11 @@
 from .lib import *
 from .third_party.yolov5.models.yolo import attempt_load, non_max_suppression
 from .third_party.yolov5.utils.loss import ComputeLoss
+from .third_party.facenet import MTCNN
+from .third_party.facenet import InceptionResnetV1 as IResnet
 from .utils import ValidPad
 
-__all__ = ['YOLOv5']
+__all__ = ['YOLOv5', 'MTCNN', 'IResnet']
 
 
 class YOLOv5:

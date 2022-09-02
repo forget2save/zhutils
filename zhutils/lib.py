@@ -42,3 +42,5 @@ from tqdm import tqdm
 # math
 import random
 import math
+
+ZHUTILS = os.path.split(os.path.abspath(__file__))[0]
