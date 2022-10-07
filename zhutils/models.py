@@ -3,9 +3,10 @@ from .third_party.yolov5.models.yolo import attempt_load, non_max_suppression
 from .third_party.yolov5.utils.loss import ComputeLoss
 from .third_party.facenet import MTCNN
 from .third_party.facenet import InceptionResnetV1 as IResnet
+from .third_party.facerecog import *
 from .utils import ValidPad
 
-__all__ = ['YOLOv5', 'MTCNN', 'IResnet']
+__all__ = ['YOLOv5', 'MTCNN', 'IResnet', 'FaceRecogModel']
 
 
 class YOLOv5:
@@ -46,4 +47,42 @@ class YOLOv5:
         else:
             ret = self.model(x)[0]
         return ret
+
+
+class FaceRecogModel:
+    def __init__(self, device, varient="facenet") -> None:
+        if varient == "facenet":
+            self.net = InceptionResnetV1(pretrained="vggface2", device=device)
+        elif varient == "mobile":
+            self.net = MobileFaceNet(512).to(device)
+        elif varient == "ir152":
+            self.net = IR_152((112, 112)).to(device)
+        elif varient == "irse50":
+            self.net = IR_SE_50((112, 112)).to(device)
+        self.input_size = (112, 112)
+        
+        url = "https://github.com/forget2save/zhutils/releases/download/Models2"
+        weights = f"weights/{varient}.pth"
+        if not os.path.exists(weights):
+            if not os.path.exists(os.path.dirname(weights)):
+                os.makedirs(os.path.dirname(weights))
+            torch.hub.download_url_to_file(f"{url}/{varient}.pth", weights)
+        self.net.load_state_dict(torch.load(weights, map_location=device))
+        self.net.eval()
+
+    def __call__(self, x:torch.Tensor, norm=True) -> Any:
+        y = self.resize(x)
+        z = self.net(2*y-1)
+        if norm:
+            z = self.l2_norm(z)
+        return z
+    
+    def resize(self, x:torch.Tensor) -> torch.Tensor:
+        assert x.ndim == 4
+        return F.interpolate(x, self.input_size, mode="area")
+    
+    def l2_norm(self, input:torch.Tensor, axis=1):
+        norm = torch.norm(input, 2, axis, True)
+        output = torch.div(input, norm)
+        return output
 
